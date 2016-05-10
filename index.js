@@ -1,16 +1,99 @@
 var express=require('express');
+var _=require('lodash');
 var path=require('path');
 var bodyparser=require("body-parser");
 var crypto=require('crypto');
 var session=require('express-session');
 var moment=require('moment');
 var checkLogin=require('./checkLogin.js');
+var methodOverride=require('method-override');
 
-var mongoose=require('mongoose');
-var models=require('./models/models');
+var Waterline=require('waterline');
+var mysqlAdapter=require('sails-mysql');
+var mongoAdapter=require('sails-mongo');
 
-mongoose.connect('mongodb://localhost:27017/notes');
-mongoose.connection.on('error',console.error.bind(console,'连接数据库失败'));
+var adapters={
+	mongo:mongoAdapter,
+	mysql:mysqlAdapter,
+	default:'mysql'
+};
+
+var connections={
+	mongo:{
+		adapter:'mongo',
+		url:'mongodb://localhost/waterline_sample'
+	},
+	mysql:{
+		adapter:'mysql',
+		url:'mysql://root:wasd12345@localhost/waterlinesample'
+	}
+};
+
+var User=Waterline.Collection.extend({
+	identity:'user',
+	connection:'mysql',
+	schema:true,
+	attributes:{
+		username:{
+			type:'string',
+			required:true
+		},
+		password:{
+			type:'string',
+			required:true
+		},
+		email:'string',
+		createTime:new Date()
+		/*beforeCreate:function(value,cb){
+			value.createTime=new Date();
+			return cb();
+		}*/
+	}
+});
+
+var Note=Waterline.Collection.extend({
+	identity:'note',
+	connection:'mysql',
+	attributes:{
+		title:{
+			type:'string',
+			required:true
+		},
+		author:{
+			type:'string',
+			required:true
+		},
+		tag:{
+			type:'string',
+			required:true
+		},
+		content:{
+			type:'string',
+			required:true
+		},
+		createTime:new Date(),
+		/*beforeCreate:function(value,cb){
+			value.createTime=new Date();
+			return cb();
+		}*/
+	}		
+});
+
+var orm=new Waterline();
+
+orm.loadCollection(User);
+orm.loadCollection(Note);
+
+var config={
+	adapters:adapters,
+	connections:connections
+};
+
+//var mongoose=require('mongoose');
+//var models=require('./models/models');
+
+//mongoose.connect('mongodb://localhost:27017/notes');
+//mongoose.connection.on('error',console.error.bind(console,'连接数据库失败'));
 
 var app=express();
 
@@ -21,6 +104,7 @@ app.use(express.static(path.join(__dirname,'public')));
 
 app.use(bodyparser.json());
 app.use(bodyparser.urlencoded({extended:true}));
+app.use(methodOverride());
 
 app.use(session({
 	secret:'1234',
@@ -30,22 +114,21 @@ app.use(session({
 	saveUninitialized:true
 }));
 
-var User=models.User;
-var Note=models.Note;
-
 //app.get('/',checkLogin.noLogin);
 app.get('/',function(req,res) {
 	if(req.session.user != null) {
-		Note.find({author: req.session.user.username})
-			.exec(function (err, allNotes) {
+		app.models.note.find({author: req.session.user.username})
+			.exec(function (err,models) {
 				if (err) {
 					console.log(err);
 					return res.redirect('/');
 				}
+				//res.json(models);
+				console.log(models);
 				res.render('index', {
 					title: '首页',
 					user: req.session.user,
-					notes: allNotes
+					notes:models
 				});
 			})
 	} else {
@@ -108,13 +191,13 @@ app.post('/register',function(req,res){
 		return res.redirect('/register');
 	}
 
-	User.findOne({username:username},function(err,user){
+	app.models.user.findOne({username:username},function(err,model){
 		if(err){
 			console.log(err);
 			return res.redirect('/register');
 		}
 
-		if(user){
+		if(model){
 			console.log('用户名已经存在');
 			flag=1;
 			return res.redirect('/register');
@@ -122,17 +205,15 @@ app.post('/register',function(req,res){
 
 		var md5=crypto.createHash('md5'),
 			md5password=md5.update(password).digest('hex');
-
-		var newUser=new User({
-			username:username,
-			password:md5password
-		});
-
-		newUser.save(function(err,doc){
+		
+		//res.json(model);
+		app.models.user.create({username:username,password:md5password},function(err,model){
 			if(err){
 				console.log(err);
 				return res.redirect('/register');
 			}
+			//res.json(model);
+			console.log(model);
 			console.log("注册成功！");
 			return res.redirect('/');
 		});
@@ -156,26 +237,27 @@ app.post('/login',function(req,res){
 	var username=req.body.username,
 		password=req.body.password;
 
-	User.findOne({username:username},function(err,user){
+	app.models.user.findOne({username:username},function(err,model){
 		if(err){
 			console.log(err);
 			return res.redirect('/login');
 		}
-		if(!user){
+		if(!model){
 			console.log('用户不存在！');
 			return res.redirect('/login');
 		}
 
 		var md5=crypto.createHash('md5'),
 			md5password=md5.update(password).digest('hex');
-		if(user.password!==md5password){
+		if(model.password!==md5password){
 			console.log('密码错误！');
 			return res.redirect('/login');
 		}
+		//res.json(model);
 		console.log('登陆成功！');
-		user.password=null;
+		model.password=null;
 		//delete user.password;
-		req.session.user=user;
+		req.session.user=model;
 		return res.redirect('/');
 	});
 });
@@ -196,18 +278,13 @@ app.get('/post',function(req,res){
 });
 
 app.post('/post',function(req,res){
-	var note=new Note({
-		title:req.body.title,
-		author:req.session.user.username,
-		tag:req.body.tag,
-		content:req.body.content
-	});
-
-	note.save(function(err,doc){
+	app.models.note.create({title:req.body.title,author:req.session.user.username,tag:req.body.tag,content:req.body.content},function(err,model){
 		if(err){
 			console.log(err);
 			return res.redirect('/post');
 		}
+		//res.json(model);
+		console.log(model);
 		console.log('文章发表成功！');
 		return res.redirect('/');
 	});
@@ -215,23 +292,31 @@ app.post('/post',function(req,res){
 
 app.get('/detail/:_id',function(req,res){
 	console.log('查看笔记！');
-    Note.findOne({_id:req.params._id})
-        .exec(function(err,art){
-            if(err){
-                console.log(err);
-                return res.redirect('/');
-            }
-            if(art){
-                res.render('detail',{
-                    title:'笔记详情',
-                    user:req.session.user,
-                    art:art,
-                    moment:moment
-                });
-            }
-        });
+	app.models.note.findOne({_id:req.params._id},function(err,model){
+		if(err){
+			console.log(err);
+			return res.redirect('/');	
+		}
+		if(model){
+			res.render('detail',{
+				title:'笔记详情',
+				user:req.session.user,
+				art:model,
+				moment:moment
+			});
+		
+		}
+	});
 });
 
-app.listen(3000,function(req,res){
+orm.initialize(config,function(err,models){
+	if(err){
+		console.error('orm initialize failed.',err);
+		return;
+	}
+	app.models=models.collections;
+	app.connections=models.connections;
+
+	app.listen(3000);
 	console.log('app is running at port 3000');
 });

@@ -25,13 +25,14 @@ var connections={
 	},
 	mysql:{
 		adapter:'mysql',
-		url:'mysql://root:wasd12345@localhost/waterlinesample'
+		url:'mysql://root:123456@localhost/waterlinesample'
 	}
 };
 
 var User=Waterline.Collection.extend({
 	identity:'user',
 	connection:'mysql',
+	migrate:'safe',
 	schema:true,
 	attributes:{
 		username:{
@@ -54,6 +55,7 @@ var User=Waterline.Collection.extend({
 var Note=Waterline.Collection.extend({
 	identity:'note',
 	connection:'mysql',
+	migrate:'safe',
 	attributes:{
 		title:{
 			type:'string',
@@ -290,9 +292,9 @@ app.post('/post',function(req,res){
 	});
 });
 
-app.get('/detail/:_id',function(req,res){
+app.get('/detail/:id',function(req,res){
 	console.log('查看笔记！');
-	app.models.note.findOne({_id:req.params._id},function(err,model){
+	app.models.note.findOne({id:req.params.id},function(err,model){
 		if(err){
 			console.log(err);
 			return res.redirect('/');	
